@@ -72,7 +72,6 @@ func echo(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		defer conn.Close()
 		for {
 			select {
 			case message, ok := <-messageChan:
