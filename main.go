@@ -101,5 +101,22 @@ func echo(w http.ResponseWriter, r *http.Request) {
 func main() {
 	router := gin.Default()
 	router.GET("/ws", gin.WrapH(http.HandlerFunc(echo)))
+
+	router.POST("/chat", chatHandler)
+
 	log.Fatal(router.Run(":8080"))
+}
+
+type ChatRequest struct {
+	Message string `json:"message"`
+}
+
+func chatHandler(c *gin.Context) {
+	var req ChatRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"response": "Received your message: " + req.Message})
 }
