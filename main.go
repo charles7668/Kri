@@ -17,94 +17,99 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var (
+type WebSocketManager struct {
 	isClientConnected  bool
 	clientConnectMutex sync.Mutex
-)
+}
+
+var wsManager = WebSocketManager{
+	isClientConnected:  false,
+	clientConnectMutex: sync.Mutex{},
+}
 
 func echo(w http.ResponseWriter, r *http.Request) {
-	clientConnectMutex.Lock()
-	if isClientConnected {
-		clientConnectMutex.Unlock()
+	wsManager.clientConnectMutex.Lock()
+	if wsManager.isClientConnected {
+		wsManager.clientConnectMutex.Unlock()
 		http.Error(w, "A client is already connected", http.StatusConflict)
 		return
 	}
-	isClientConnected = true
-	clientConnectMutex.Unlock()
+	wsManager.isClientConnected = true
+	wsManager.clientConnectMutex.Unlock()
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
-		clientConnectMutex.Lock()
+		wsManager.clientConnectMutex.Lock()
 		// Reset flag on upgrade error
-		isClientConnected = false
-		clientConnectMutex.Unlock()
+		wsManager.isClientConnected = false
+		wsManager.clientConnectMutex.Unlock()
 		return
 	}
 
 	defer func() {
-		clientConnectMutex.Lock()
-		isClientConnected = false // Reset flag when connection closes
-		clientConnectMutex.Unlock()
+		wsManager.clientConnectMutex.Lock()
+		wsManager.isClientConnected = false // Reset flag when connection closes
+		wsManager.clientConnectMutex.Unlock()
 		conn.Close()
 	}()
 
-	var wg sync.WaitGroup
 	done := make(chan struct{})
 	messageChan := make(chan []byte)
 
-	// Reader goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		// Close messageChan when reader exits
-		defer close(messageChan)
-		for {
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				log.Println("read error:", err)
-				// Signal writer to exit
-				close(done)
-				return
-			}
-			log.Printf("Received: %s", message)
-			messageChan <- message
-		}
-	}()
+	var wg sync.WaitGroup
+	wg.Add(2)
 
-	// Writer goroutine
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for {
-			select {
-			case message, ok := <-messageChan:
-				// messageChan was closed by reader
-				if !ok {
-					return
-				}
-				err := conn.WriteMessage(websocket.TextMessage, message)
-				if err != nil {
-					log.Println("write error:", err)
-					return
-				}
-			case <-done: // Reader signaled to exit
-				return
-			}
-		}
-	}()
+	go readPump(conn, messageChan, done, &wg)
+	go writePump(conn, messageChan, done, &wg)
 
-	// Wait for both goroutines to finish
 	wg.Wait()
 }
 
+func readPump(conn *websocket.Conn, messageChan chan<- []byte, done chan<- struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer close(messageChan)
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			log.Println("read error:", err)
+			close(done)
+			return
+		}
+		log.Printf("Received: %s", message)
+		messageChan <- message
+	}
+}
+
+func writePump(conn *websocket.Conn, messageChan <-chan []byte, done <-chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for {
+		select {
+		case message, ok := <-messageChan:
+			if !ok {
+				return
+			}
+			err := conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				log.Println("write error:", err)
+				return
+			}
+		case <-done:
+			return
+		}
+	}
+}
+
 func main() {
+	router := setupRouter()
+	log.Fatal(router.Run(":8080"))
+}
+
+func setupRouter() *gin.Engine {
 	router := gin.Default()
 	router.GET("/ws", gin.WrapH(http.HandlerFunc(echo)))
-
 	router.POST("/chat", chatHandler)
-
-	log.Fatal(router.Run(":8080"))
+	return router
 }
 
 type ChatRequest struct {
