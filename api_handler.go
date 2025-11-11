@@ -52,5 +52,7 @@ func ChatHandler(c *gin.Context) {
 	manager.messageChan <- []byte(req.Message)
 	manager.messageChanMutex.Unlock()
 
-	c.JSON(http.StatusOK, gin.H{"response": "Message sent to websocket: " + req.Message})
+	response := <-manager.receiveChan
+
+	c.JSON(http.StatusOK, gin.H{"response": string(response)})
 }

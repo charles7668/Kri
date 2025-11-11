@@ -22,6 +22,7 @@ type WebSocketManager struct {
 	clientConnectMutex sync.Mutex
 	messageChan        chan []byte
 	messageChanMutex   sync.Mutex
+	receiveChan        chan []byte
 }
 
 var WsManager = WebSocketManager{
@@ -29,7 +30,7 @@ var WsManager = WebSocketManager{
 	clientConnectMutex: sync.Mutex{},
 }
 
-func echo(w http.ResponseWriter, r *http.Request) {
+func connectWS(w http.ResponseWriter, r *http.Request) {
 	WsManager.clientConnectMutex.Lock()
 	if WsManager.isClientConnected {
 		WsManager.clientConnectMutex.Unlock()
@@ -51,6 +52,7 @@ func echo(w http.ResponseWriter, r *http.Request) {
 
 	WsManager.messageChanMutex.Lock()
 	WsManager.messageChan = make(chan []byte)
+	WsManager.receiveChan = make(chan []byte)
 	WsManager.messageChanMutex.Unlock()
 
 	defer func() {
@@ -71,7 +73,7 @@ func echo(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	go readPump(conn, WsManager.messageChan, done, &wg)
+	go readPump(conn, WsManager.receiveChan, done, &wg)
 	go writePump(conn, WsManager.messageChan, done, &wg)
 
 	wg.Wait()
@@ -87,6 +89,7 @@ func readPump(conn *websocket.Conn, messageChan chan []byte, done chan<- struct{
 			return
 		}
 		log.Printf("Received: %s", message)
+		messageChan <- message
 	}
 }
 
@@ -121,7 +124,7 @@ func main() {
 
 func setupRouter() *gin.Engine {
 	router := gin.Default()
-	router.GET("/ws", gin.WrapH(http.HandlerFunc(echo)))
+	router.GET("/ws", gin.WrapH(http.HandlerFunc(connectWS)))
 	router.POST("/chat", PrepareWSManager(&WsManager), ChatHandler)
 	return router
 }
