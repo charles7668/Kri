@@ -30,8 +30,12 @@ func ChatHandler(c *gin.Context) {
 	}
 
 	var req ChatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := c.ShouldBindJSON(&req); err != nil || req.Message == "" {
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Message is empty"})
+		}
 		return
 	}
 
