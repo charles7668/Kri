@@ -99,6 +99,15 @@
     myButton.style.cursor = 'pointer';
     myButton.style.borderRadius = '5px 0 0 5px';
 
+    let setConnectState = (state) => {
+        isConnected = state;
+        if (state) {
+            myButton.style.backgroundColor = 'green';
+        } else {
+            myButton.style.backgroundColor = '#007bff';
+        }
+    }
+
     let isConnected = false;
     let ws;
     let receiveLock = false;
@@ -107,7 +116,7 @@
     myButton.addEventListener('click', mouseEvent => {
         if (isConnected) {
             ws.close();
-            isConnected = false;
+            setConnectState(false);
             return;
         }
         console.log('try connect to Kri');
@@ -158,13 +167,14 @@
 
         ws.onerror = (error) => {
             console.error('WebSocket error:', error);
-            alert('failed to connect to Kri with websocket connection.');
+            setConnectState(false);
         };
 
         ws.onclose = (event) => {
             console.log('WebSocket connection closed:', event);
+            setConnectState(false);
         };
-        isConnected = true;
+        setConnectState(true);
     });
 
     document.body.appendChild(myButton);
