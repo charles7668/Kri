@@ -7,6 +7,7 @@
 // @match        https://gemini.google.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=google.com
 // @grant        none
+// @require      https://unpkg.com/turndown/dist/turndown.js
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -22,6 +23,64 @@
 
 (function () {
     'use strict';
+
+    function htmlToMarkdown(html) {
+        let turndownService = new TurndownService();
+        // add <sup> tag conversion rule
+        turndownService.addRule("superscript", {
+            filter: "sup",
+            replacement: function (content) {
+                return "<sup>" + content + "</sup>";
+            }
+        });
+
+        // add <sup> tag conversion rule
+        turndownService.addRule("subscript", {
+            filter: "sub",
+            replacement: function (content) {
+                return "<sub>" + content + "</sub>";
+            }
+        });
+
+        // convert pre formatted text to code block
+        turndownService.addRule("prescript", {
+            filter: "pre",
+            replacement: function (content, node, options) {
+                return "```" + "\n" + node.innerText + "\n" + "```";
+            }
+        });
+
+        // convert <code> tag
+        turndownService.addRule("customCode", {
+            filter: "code",
+            replacement: function (content, node, options) {
+                let hasSiblings = node.childNodes.length > 1;
+                if (hasSiblings) {
+                    return "<code>" + content + "</code>";
+                } else {
+                    return "`" + content + "`";
+                }
+            }
+        });
+
+        turndownService.addRule('b', {
+            filter: "b",
+            replacement: function (content, node, options) {
+                return "**" + content + "**";
+            }
+        })
+
+        turndownService.addRule('hr', {
+            filter: "hr",
+            replacement: function (content, node, options) {
+                return "---";
+            }
+        })
+
+        let markdown = turndownService.turndown(html);
+
+        return markdown;
+    }
 
     // Create the button element
     const myButton = document.createElement('button');
@@ -70,17 +129,28 @@
             let waitInterval;
             setTimeout(() => {
                 let sendBtn = document.querySelector('button.send-button');
-                console.log('sendBtn clicked', sendBtn);
                 sendBtn.click();
                 waitInterval = setInterval(() => {
                     let avatarIcons = document.querySelectorAll('.avatar_primary_animation.is-gpi-avatar.aurora-enabled');
                     let avatar = avatarIcons[avatarIcons.length - 1];
                     let attr = avatar.getAttribute('data-test-lottie-animation-status')
-                    console.log('avatar', avatar);
                     if (attr === 'completed') {
                         clearInterval(waitInterval);
+                        let responses = document.querySelectorAll('message-content.model-response-text');
+                        let response = responses[responses.length - 1].querySelector('div');
+                        let children = response.children;
+                        let responseText = '';
+                        for (let i = 0; i < children.length; i++) {
+                            if (children[i].nodeName.toLowerCase() === 'hr') {
+                                responseText += '---';
+                            } else {
+                                responseText += htmlToMarkdown(children[i].innerHTML);
+                            }
+                            responseText += '\n';
+                        }
+                        console.log(responseText);
+                        ws.send(responseText);
                         receiveLock = false;
-                        ws.send('complete');
                     }
                 }, 100)
             }, 100)
