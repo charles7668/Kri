@@ -87,7 +87,6 @@ func readPump(conn *websocket.Conn, messageChan chan []byte, done chan<- struct{
 			return
 		}
 		log.Printf("Received: %s", message)
-		messageChan <- message
 	}
 }
 

@@ -42,6 +42,7 @@
 
     let isConnected = false;
     let ws;
+    let receiveLock = false;
 
     // Add a click event listener
     myButton.addEventListener('click', mouseEvent => {
@@ -55,11 +56,34 @@
 
         ws.onopen = () => {
             console.log('WebSocket connection opened.');
-            ws.send('123');
         };
 
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
+            if (receiveLock) {
+                console.log('other message is processing');
+                return;
+            }
+            receiveLock = true;
             console.log('WebSocket message received:', event.data);
+            let textarea = document.querySelector('.textarea');
+            textarea.innerHTML = '<p>' + event.data + '</p>';
+            let waitInterval;
+            setTimeout(() => {
+                let sendBtn = document.querySelector('button.send-button');
+                console.log('sendBtn clicked', sendBtn);
+                sendBtn.click();
+                waitInterval = setInterval(() => {
+                    let avatarIcons = document.querySelectorAll('.avatar_primary_animation.is-gpi-avatar.aurora-enabled');
+                    let avatar = avatarIcons[avatarIcons.length - 1];
+                    let attr = avatar.getAttribute('data-test-lottie-animation-status')
+                    console.log('avatar', avatar);
+                    if (attr === 'completed') {
+                        clearInterval(waitInterval);
+                        receiveLock = false;
+                        ws.send('complete');
+                    }
+                }, 100)
+            }, 100)
         };
 
         ws.onerror = (error) => {
