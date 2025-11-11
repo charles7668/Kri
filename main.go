@@ -24,44 +24,44 @@ type WebSocketManager struct {
 	messageChanMutex   sync.Mutex
 }
 
-var wsManager = WebSocketManager{
+var WsManager = WebSocketManager{
 	isClientConnected:  false,
 	clientConnectMutex: sync.Mutex{},
 }
 
 func echo(w http.ResponseWriter, r *http.Request) {
-	wsManager.clientConnectMutex.Lock()
-	if wsManager.isClientConnected {
-		wsManager.clientConnectMutex.Unlock()
+	WsManager.clientConnectMutex.Lock()
+	if WsManager.isClientConnected {
+		WsManager.clientConnectMutex.Unlock()
 		http.Error(w, "A client is already connected", http.StatusConflict)
 		return
 	}
-	wsManager.isClientConnected = true
-	wsManager.clientConnectMutex.Unlock()
+	WsManager.isClientConnected = true
+	WsManager.clientConnectMutex.Unlock()
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
-		wsManager.clientConnectMutex.Lock()
+		WsManager.clientConnectMutex.Lock()
 		// Reset flag on upgrade error
-		wsManager.isClientConnected = false
-		wsManager.clientConnectMutex.Unlock()
+		WsManager.isClientConnected = false
+		WsManager.clientConnectMutex.Unlock()
 		return
 	}
 
-	wsManager.messageChanMutex.Lock()
-	wsManager.messageChan = make(chan []byte)
-	wsManager.messageChanMutex.Unlock()
+	WsManager.messageChanMutex.Lock()
+	WsManager.messageChan = make(chan []byte)
+	WsManager.messageChanMutex.Unlock()
 
 	defer func() {
-		wsManager.clientConnectMutex.Lock()
-		wsManager.isClientConnected = false // Reset flag when connection closes
-		wsManager.clientConnectMutex.Unlock()
+		WsManager.clientConnectMutex.Lock()
+		WsManager.isClientConnected = false // Reset flag when connection closes
+		WsManager.clientConnectMutex.Unlock()
 
-		wsManager.messageChanMutex.Lock()
-		close(wsManager.messageChan)
-		wsManager.messageChan = nil // Clear the channel
-		wsManager.messageChanMutex.Unlock()
+		WsManager.messageChanMutex.Lock()
+		close(WsManager.messageChan)
+		WsManager.messageChan = nil // Clear the channel
+		WsManager.messageChanMutex.Unlock()
 
 		conn.Close()
 	}()
@@ -71,8 +71,8 @@ func echo(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	go readPump(conn, wsManager.messageChan, done, &wg)
-	go writePump(conn, wsManager.messageChan, done, &wg)
+	go readPump(conn, WsManager.messageChan, done, &wg)
+	go writePump(conn, WsManager.messageChan, done, &wg)
 
 	wg.Wait()
 }
@@ -107,6 +107,14 @@ func writePump(conn *websocket.Conn, messageChan <-chan []byte, done <-chan stru
 	}
 }
 
+// PrepareWSManager injects the WsManager into the Gin context.
+func PrepareWSManager(wsManager *WebSocketManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(WsManagerKey, wsManager)
+		c.Next()
+	}
+}
+
 func main() {
 	router := setupRouter()
 	log.Fatal(router.Run(":8080"))
@@ -115,37 +123,6 @@ func main() {
 func setupRouter() *gin.Engine {
 	router := gin.Default()
 	router.GET("/ws", gin.WrapH(http.HandlerFunc(echo)))
-	router.POST("/chat", chatHandler)
+	router.POST("/chat", PrepareWSManager(&WsManager), ChatHandler)
 	return router
-}
-
-type ChatRequest struct {
-	Message string `json:"message"`
-}
-
-func chatHandler(c *gin.Context) {
-	var req ChatRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	wsManager.clientConnectMutex.Lock()
-	if !wsManager.isClientConnected {
-		wsManager.clientConnectMutex.Unlock()
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No websocket client connected"})
-		return
-	}
-	wsManager.clientConnectMutex.Unlock()
-
-	wsManager.messageChanMutex.Lock()
-	if wsManager.messageChan == nil {
-		wsManager.messageChanMutex.Unlock()
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Websocket message channel not initialized"})
-		return
-	}
-	wsManager.messageChan <- []byte(req.Message)
-	wsManager.messageChanMutex.Unlock()
-
-	c.JSON(http.StatusOK, gin.H{"response": "Message sent to websocket: " + req.Message})
 }
