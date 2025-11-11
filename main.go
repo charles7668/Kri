@@ -20,6 +20,8 @@ var upgrader = websocket.Upgrader{
 type WebSocketManager struct {
 	isClientConnected  bool
 	clientConnectMutex sync.Mutex
+	messageChan        chan []byte
+	messageChanMutex   sync.Mutex
 }
 
 var wsManager = WebSocketManager{
@@ -47,28 +49,36 @@ func echo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	wsManager.messageChanMutex.Lock()
+	wsManager.messageChan = make(chan []byte)
+	wsManager.messageChanMutex.Unlock()
+
 	defer func() {
 		wsManager.clientConnectMutex.Lock()
 		wsManager.isClientConnected = false // Reset flag when connection closes
 		wsManager.clientConnectMutex.Unlock()
+
+		wsManager.messageChanMutex.Lock()
+		close(wsManager.messageChan)
+		wsManager.messageChan = nil // Clear the channel
+		wsManager.messageChanMutex.Unlock()
+
 		conn.Close()
 	}()
 
 	done := make(chan struct{})
-	messageChan := make(chan []byte)
 
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	go readPump(conn, messageChan, done, &wg)
-	go writePump(conn, messageChan, done, &wg)
+	go readPump(conn, wsManager.messageChan, done, &wg)
+	go writePump(conn, wsManager.messageChan, done, &wg)
 
 	wg.Wait()
 }
 
-func readPump(conn *websocket.Conn, messageChan chan<- []byte, done chan<- struct{}, wg *sync.WaitGroup) {
+func readPump(conn *websocket.Conn, messageChan chan []byte, done chan<- struct{}, wg *sync.WaitGroup) {
 	defer wg.Done()
-	defer close(messageChan)
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -85,10 +95,7 @@ func writePump(conn *websocket.Conn, messageChan <-chan []byte, done <-chan stru
 	defer wg.Done()
 	for {
 		select {
-		case message, ok := <-messageChan:
-			if !ok {
-				return
-			}
+		case message := <-messageChan:
 			err := conn.WriteMessage(websocket.TextMessage, message)
 			if err != nil {
 				log.Println("write error:", err)
@@ -123,5 +130,22 @@ func chatHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"response": "Received your message: " + req.Message})
+	wsManager.clientConnectMutex.Lock()
+	if !wsManager.isClientConnected {
+		wsManager.clientConnectMutex.Unlock()
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "No websocket client connected"})
+		return
+	}
+	wsManager.clientConnectMutex.Unlock()
+
+	wsManager.messageChanMutex.Lock()
+	if wsManager.messageChan == nil {
+		wsManager.messageChanMutex.Unlock()
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Websocket message channel not initialized"})
+		return
+	}
+	wsManager.messageChan <- []byte(req.Message)
+	wsManager.messageChanMutex.Unlock()
+
+	c.JSON(http.StatusOK, gin.H{"response": "Message sent to websocket: " + req.Message})
 }
