@@ -20,7 +20,7 @@ through your Tampermonkey settings.
 3. Scroll down to the "Security" section.
 4. Set the option "Modify existing content security policy (CSP) headers" to "Yes".
 
-Copy [tampermonkey_script.js](./browser_scripts/tempermonkey_script.js) to Tampermonkey's 'Add new script'.
+Copy [tampermonkey_script.js](./browser_scripts/tampermonkey_script.js) to Tampermonkey's 'Add new script'.
 
 ## Usage
 
